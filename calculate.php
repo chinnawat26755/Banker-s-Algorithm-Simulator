@@ -1,91 +1,17 @@
 <?php
 // =============================================
-// SECURITY ENHANCEMENTS - ACCESS CONTROL
+// RAW CALCULATION (No Security Tokens)
 // =============================================
 
-// Start secure session
+// Start simple session
 if (session_status() === PHP_SESSION_NONE) {
-    session_start([
-        'cookie_httponly' => true,
-        'cookie_secure' => true,
-        'cookie_samesite' => 'Strict'
-    ]);
+    session_start();
 }
 
-// Security Headers
-header("X-Content-Type-Options: nosniff");
-header("X-Frame-Options: DENY");
-header("X-XSS-Protection: 1; mode=block");
-header("Referrer-Policy: strict-origin-when-cross-origin");
-
-// 1. ตรวจสอบ HTTP Method (ต้องเป็น POST เท่านั้น)
+// 1. ตรวจสอบ HTTP Method
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    http_response_code(405);
-    die('
-        <div class="container mt-5">
-            <div class="card shadow-lg border-0 rounded-3">
-                <div class="card-body text-center p-5">
-                    <div class="alert alert-danger">
-                        <h4><i class="bi bi-exclamation-triangle-fill me-2"></i>วิธีการไม่ถูกต้อง</h4>
-                        <p>ต้องส่งข้อมูลผ่านแบบฟอร์มเท่านั้น</p>
-                        <a href="/" class="btn btn-primary">กลับหน้าหลัก</a>
-                    </div>
-                </div>
-            </div>
-        </div>
-    ');
-}
-
-// 2. ตรวจสอบ Form Token
-if (!isset($_POST['form_token']) || !isset($_SESSION['form_token']) || 
-    $_POST['form_token'] !== $_SESSION['form_token']) {
-    http_response_code(403);
-    die('
-        <div class="container mt-5">
-            <div class="card shadow-lg border-0 rounded-3">
-                <div class="card-body text-center p-5">
-                    <div class="alert alert-danger">
-                        <h4><i class="bi bi-shield-exclamation me-2"></i>การเข้าถึงไม่ถูกต้อง</h4>
-                        <p>กรุณากรอกข้อมูลผ่านหน้าแรกเท่านั้น</p>
-                        <a href="/" class="btn btn-primary mt-3">กลับหน้าหลัก</a>
-                    </div>
-                </div>
-            </div>
-        </div>
-    ');
-}
-
-// 3. ลบ token หลังใช้งาน (ป้องกัน reuse)
-unset($_SESSION['form_token']);
-
-// 4. Rate Limiting
-$rate_limit_key = 'calc_rate_limit_' . ($_SERVER['REMOTE_ADDR'] ?? 'unknown');
-if (!isset($_SESSION[$rate_limit_key])) {
-    $_SESSION[$rate_limit_key] = ['count' => 0, 'timestamp' => time()];
-}
-
-$current_time = time();
-$time_window = 60; // 1 minute
-if ($current_time - $_SESSION[$rate_limit_key]['timestamp'] > $time_window) {
-    $_SESSION[$rate_limit_key] = ['count' => 1, 'timestamp' => $current_time];
-} else {
-    $_SESSION[$rate_limit_key]['count']++;
-    if ($_SESSION[$rate_limit_key]['count'] > 15) { // Max 15 calculations per minute
-        http_response_code(429);
-        die('
-            <div class="container mt-5">
-                <div class="card shadow-lg border-0 rounded-3">
-                    <div class="card-body text-center p-5">
-                        <div class="alert alert-warning">
-                            <h4><i class="bi bi-clock-history me-2"></i>คำขอมากเกินไป</h4>
-                            <p>กรุณารอสักครู่ก่อนทำการคำนวณอีกครั้ง</p>
-                            <a href="/" class="btn btn-primary mt-3">กลับหน้าหลัก</a>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        ');
-    }
+    header("Location: index.php");
+    exit;
 }
 
 // --- (ส่วนรับค่า) ---
@@ -97,19 +23,13 @@ function validate_integer($value, $min = 0, $max = 1000) {
 $numProcesses = isset($_POST['n']) ? validate_integer($_POST['n'], 1, 10) : 0;
 $numResources = isset($_POST['m']) ? validate_integer($_POST['m'], 1, 10) : 0;
 
-// ตรวจสอบว่ามีค่า n และ m หรือไม่
 if ($numProcesses <= 0 || $numResources <= 0) {
-    http_response_code(400);
     die('
         <div class="container mt-5">
-            <div class="card shadow-lg border-0 rounded-3">
-                <div class="card-body text-center p-5">
-                    <div class="alert alert-danger">
-                        <h4><i class="bi bi-x-circle-fill me-2"></i>ข้อมูลไม่ครบถ้วน</h4>
-                        <p>กรุณากรอกจำนวน Process และ Resource ให้ถูกต้อง</p>
-                        <a href="/" class="btn btn-primary mt-3">กลับหน้าหลัก</a>
-                    </div>
-                </div>
+            <div class="alert alert-danger text-center">
+                <h4><i class="bi bi-x-circle-fill me-2"></i>ข้อมูลไม่ครบถ้วน</h4>
+                <p>กรุณากรอกจำนวน Process และ Resource ให้ถูกต้อง</p>
+                <a href="index.php" class="btn btn-primary mt-3">กลับหน้าหลัก</a>
             </div>
         </div>
     ');
@@ -149,19 +69,25 @@ function formatArray($arr) {
 }
 
 function showMatrixTH($title, $matrix, $numResources) {
-    $icon = '';
-    if (strpos($title, 'Allocation') !== false) $icon = "<i class='bi bi-grid-3x3-gap-fill me-2 text-info'></i>";
-    elseif (strpos($title, 'Need') !== false) $icon = "<i class='bi bi-grid-3x3-gap-fill me-2 text-warning'></i>";
+    $gradStyle = "style=\"background: linear-gradient(120deg,#0d6a44,#23a56f); -webkit-background-clip:text; color:transparent;\"";
     
+    if (strpos($title, 'Allocation') !== false) {
+        $icon = "<i class='ti ti-table-filled me-2' $gradStyle></i>";
+    } elseif (strpos($title, 'Need') !== false) {
+        $icon = "<i class='ti ti-math-function me-2' $gradStyle></i>";
+    } else {
+        $icon = "<i class='ti ti-stack-2 me-2' $gradStyle></i>";
+    }
+
     echo "<h3 class='h5 mt-4 mb-3'>$icon" . htmlspecialchars($title) . "</h3>";
     echo "<div class='table-responsive shadow-sm rounded mb-4'>";
-    echo "<table class='table table-bordered text-center align-middle mb-0'>";
+    echo "<table class='table table-bordered text-center align-middle mb-0 table-gradient'>";
     echo "<thead class='table-light'><tr><th style='width:120px;'>Process</th>";
     for ($j = 0; $j < $numResources; $j++) {
         echo "<th>R" . ($j + 1) . "</th>";
     }
     echo "</tr></thead><tbody>";
-    
+
     for ($i = 0; $i < count($matrix); $i++) {
         echo "<tr><td>P" . ($i + 1) . "</td>";
         if (isset($matrix[$i]) && is_array($matrix[$i])) {
@@ -178,115 +104,177 @@ function showMatrixTH($title, $matrix, $numResources) {
     echo "</tbody></table></div>";
 }
 
-// --- แปลงค่า ---
 $NeedMatrix = toIntMatrix($NeedMatrix_raw, $numProcesses, $numResources);
 $AllocationMatrix = toIntMatrix($AllocationMatrix_raw, $numProcesses, $numResources);
 $AvailableVector = toIntArray($AvailableVector_raw, $numResources);
 
 // --- HTML Header ---
-echo "<!DOCTYPE html><html lang='th'><head><meta charset='UTF-8'>
-<meta name='viewport' content='width=device-width, initial-scale=1.0'>
-<title>ผลการคำนวณ Banker's Algorithm</title>
-<link href='https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css' rel='stylesheet'>
-<link rel='stylesheet' href='https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css'>
+echo <<<HTML
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ผลการคำนวณ Banker's Algorithm</title>
 
-<!-- CSP Header -->
-<meta http-equiv='Content-Security-Policy' content=\"
-    default-src 'self';
-    script-src 'self' https://cdn.jsdelivr.net 'unsafe-inline';
-    style-src 'self' https://cdn.jsdelivr.net 'unsafe-inline';
-    img-src 'self' data: https:;
-    font-src 'self' https://cdn.jsdelivr.net;
-    connect-src 'self';
-    frame-ancestors 'none';
-\">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.47.0/tabler-icons.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Bai+Jamjuree:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 
 <style>
-body { background-color: #f8f9fa; }
-
 :root {
-    --bs-primary: #003366;
-    --bs-primary-rgb: 0, 51, 102;
+  --emerald-dark:  #064e3b;
+  --emerald-primary: #059669;
+  --emerald-light: #10b981;
+  --surface: rgba(255,255,255,0.94);
+  --surface-soft: rgba(248,250,252,0.9);
+  --line-soft: rgba(2, 44, 34, 0.10);
 }
 
-/* Navbar Styles */
-.custom-navbar {
-    background: linear-gradient(135deg, #003366 0%, #00264d 100%);
-    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-    padding: 0.8rem 0;
-}
-.navbar-brand {
-    font-weight: 700;
-    font-size: 1.3rem;
-}
-.nav-link {
-    font-weight: 500;
-    transition: all 0.3s ease;
-}
-.nav-link:hover {
-    transform: translateY(-2px);
+body{
+  margin:0;
+  font-family:"Bai Jamjuree",system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  background: radial-gradient(circle at top left, #ffffffff 0%, #ecfdf5 40%, #e0f2f1 75%, #f9fafb 100%);
+  background-attachment: fixed !important;
+  color:#0f172a;
 }
 
-pre { background: #212529; color: #f8f9fa; padding: 1.5rem; border-radius: 0.5rem; font-family: 'Courier New', monospace; font-size:1rem; line-height:1.8; overflow-x:auto; border:1px solid #495057;}
-.table-finish .finish-true { background-color: rgba(25,135,84,0.1); color:#146c43; font-weight:bold;}
-.table-finish .finish-false { background-color: rgba(220,53,69,0.1); color:#b02a37; font-weight:bold;}
-.comparison { color:#20c997; font-weight:bold; margin:0 0.5em;}
-.alert-heading { margin-bottom:0.5rem;}
-.alert hr { margin-top:0.8rem; margin-bottom:0.8rem;}
-.alert strong { font-size:1.1em; }
-
-/* ปุ่มสีน้ำเงินเหมือนหน้า index */
-.btn-primary {
-    --bs-btn-bg: var(--bs-primary);
-    --bs-btn-border-color: var(--bs-primary);
-    --bs-btn-hover-bg: #00264d;
-    --bs-btn-hover-border-color: #00264d;
-    --bs-btn-active-bg: #001a33;
-    --bs-btn-active-border-color: #001a33;
-    --bs-btn-disabled-bg: var(--bs-primary);
-    --bs-btn-disabled-border-color: var(--bs-primary);
-    color: #fff;
-}
-.btn-primary:hover,
-.btn-primary:focus,
-.btn-primary:active {
-    filter: brightness(1.1);
+.card{
+  border-radius:22px !important;
+  background: var(--surface) !important;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 10px 35px rgba(15,23,42,0.08);
 }
 
-/* About Modal Styles */
+/* --- เพิ่ม CSS สำหรับ About Us Modal ที่หายไป --- */
 .member-card {
-    border-left: 4px solid #003366;
+    border-left: 4px solid #064e3b;
     padding: 15px;
     margin-bottom: 10px;
     background: #f8f9fa;
     border-radius: 0 8px 8px 0;
 }
+
 .section-badge {
-    background: #003366;
+    background: #064e3b;
     color: white;
     padding: 4px 12px;
     border-radius: 20px;
     font-size: 0.8em;
     font-weight: bold;
 }
+/* ---------------------------------------- */
+
+.btn-emerald{
+  background-image: linear-gradient(135deg, #047857 0%, #059669 45%, #34d399 100%) !important;
+  background-color: transparent !important; 
+  color:#fff !important;
+  border:none !important;
+  font-weight:600 !important;
+  padding:.9rem 1.2rem !important;
+  border-radius:12px !important;
+  box-shadow:0 8px 22px rgba(16,185,129,.30) !important;
+  transition: all .2s ease;
+}
+
+.btn-emerald:hover{
+  background-image: linear-gradient(135deg, #065f46 0%, #059669 50%, #6ee7b7 100%) !important;
+  background-color: transparent !important;
+  transform: translateY(-1px);
+}
+
+.btn-emerald:focus, .btn-emerald:active, .btn-emerald.active{
+  background-image: linear-gradient(135deg, #047857 0%, #059669 45%, #34d399 100%) !important;
+  background-color: transparent !important;
+  box-shadow:0 6px 18px rgba(16,185,129,.35) !important;
+}
+
+:root { --bs-primary: #059669 !important; --bs-primary-rgb: 5,150,105 !important; }
+.text-primary{ color:#059669 !important; }
+.bg-primary{ background-color:#059669 !important; }
+
+.custom-navbar{
+  background: linear-gradient(135deg, #022c22 0%, #064e3b 40%, #059669 100%) !important;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.45) !important;
+  padding: 0.8rem 0 !important;
+}
+
+.custom-navbar .navbar-brand, .custom-navbar .navbar-brand i, .custom-navbar .nav-link, .custom-navbar .nav-link i{
+  color: #ffffff !important;
+  font-weight: 700 !important;
+  text-shadow: 0 1px 2px rgba(0,0,0,.35);
+}
+
+.custom-navbar .navbar-brand:hover, .custom-navbar .nav-link:hover{ color: #ffffff !important; opacity: .9; }
+.custom-navbar .navbar-toggler{ border-color: rgba(255,255,255,.6) !important; }
+.custom-navbar .navbar-toggler-icon{ filter: invert(1); }
+
+.table-gradient{
+  border-radius:14px;
+  overflow:hidden;
+  border:1px solid rgba(5,150,105,.20);
+  background: var(--surface-soft);
+}
+
+.table-gradient thead th{
+  background: linear-gradient(90deg, var(--emerald-dark), var(--emerald-primary));
+  color:#fff !important;
+  font-weight:600;
+  border:none !important;
+  letter-spacing:.2px;
+}
+
+.table-gradient tbody td{ border-color: rgba(5,150,105,.12) !important; color:#0f172a; }
+.table-gradient tbody tr:nth-child(odd) td{ background: rgba(255,255,255,0.95); }
+.table-gradient tbody tr:nth-child(even) td{ background: rgba(236,253,245,0.55); }
+
+.step-box{
+  background: rgba(250,252,251,0.95);
+  border-left: 5px solid var(--emerald-primary);
+  padding:18px 22px;
+  border-radius:14px;
+  box-shadow:0 4px 12px rgba(0,0,0,0.05);
+  font-size:.96rem;
+  color:#0f172a;
+  white-space:pre-wrap;
+}
+
+.step-box strong.text-white{ color: var(--emerald-dark) !important; }
+
+.finish-true{ background: #d1fae5 !important; color: #047857 !important; border: 1px solid #10b981 !important; padding: 4px 10px; border-radius: 8px; font-weight: 700; display: inline-block; white-space: nowrap; width: 80px; text-align: center;}
+.finish-false{ background: #fee2e2 !important; color: #b91c1c !important; border: 1px solid #f87171 !important; padding: 4px 10px; border-radius: 8px; font-weight: 700; display: inline-block; white-space: nowrap; width: 80px; text-align: center;}
+
+.alert-success { background: linear-gradient(135deg, rgba(184, 247, 217, 0.75), rgba(152, 236, 195, 0.65)); border: none; color: #046C4E; font-weight: 600; border-left: 6px solid #34D399; border-radius: 14px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); }
+.alert-danger { background: linear-gradient(135deg, rgba(254,202,202,0.7), rgba(253,164,164,0.65)); border: none; color: #7f1d1d; font-weight: 600; border-left: 6px solid #e11d48; border-radius: 14px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); }
+
+.modal-footer .btn.btn-primary { border-radius: 999px; padding: 0.6rem 1.4rem; font-weight: 600; color: #fff; border: none; background: linear-gradient(135deg, #065f46 0%, #059669 50%, #10b981 100%); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 8px 20px rgba(5, 150, 105, 0.25); transition: 0.2s ease; }
+.modal-footer .btn.btn-primary:hover { transform: translateY(-2px); filter: brightness(1.08); }
+
 </style>
-</head><body>";
+</head>
+<body>
+HTML;
 
 // --- Navigation Bar ---
-echo "<!-- Navigation Bar -->
-<nav class='navbar navbar-expand-lg custom-navbar sticky-top'>
+echo "<nav class='navbar navbar-expand-lg custom-navbar sticky-top'>
     <div class='container'>
-        <a class='navbar-brand text-white' href='/'>
-            <i class='bi bi-cpu me-2'></i>Banker's Algorithm (CS422)
+        <a class='navbar-brand text-white fw-bold' href='index.php'>
+            <i class='bi bi-cpu me-2 text-white'></i>
+            Banker's Algorithm (CS422)
         </a>
+
         <button class='navbar-toggler border-light' type='button' data-bs-toggle='collapse' data-bs-target='#navbarNav'>
             <span class='navbar-toggler-icon' style='filter: invert(1);'></span>
         </button>
+
         <div class='collapse navbar-collapse' id='navbarNav'>
             <ul class='navbar-nav ms-auto'>
                 <li class='nav-item'>
                     <a class='nav-link text-white fw-bold' href='#' data-bs-toggle='modal' data-bs-target='#aboutModal'>
-                        <i class='bi bi-people-fill me-1'></i>About Us
+                        <i class='bi bi-people-fill me-1 text-white'></i>About Us
                     </a>
                 </li>
             </ul>
@@ -298,17 +286,22 @@ echo "<!-- Navigation Bar -->
 echo "<div class='container my-5'><div class='card shadow-lg border-0 rounded-3'><div class='card-body p-4 p-md-5'>";
 
 // --- หัวเรื่อง ---
-echo "<h1 class='card-title text-center mb-5 fw-bold text-primary'>
-<i class='bi bi-cpu me-2'></i>ผลการคำนวณ Banker's Algorithm
+echo "<h1 class='card-title text-center mb-5 fw-bold' style='color: var(--emerald-primary);'>
+<i class='bi bi-cpu me-2' style='color: var(--emerald-primary);'></i>ผลการคำนวณ Banker's Algorithm
 </h1>";
+
 
 // --- แสดงตาราง Input ---
 showMatrixTH("ตาราง Allocation (ที่จัดสรรแล้ว)", $AllocationMatrix, $numResources);
 showMatrixTH("ตาราง Need (ความต้องการที่เหลืออยู่)", $NeedMatrix, $numResources);
 
-echo "<h3 class='h5 mt-4 mb-3'><i class='bi bi-box-fill me-2 text-success'></i>ทรัพยากรที่เหลืออยู่ (Available)</h3>";
-echo "<div class='table-responsive shadow-sm rounded mb-4'><table class='table table-bordered text-center align-middle mb-0'>";
-echo "<thead class='table-light'><tr>";
+echo "<h3 class='h5 mt-4 mb-3'>
+        <i class='bi bi-layers-fill me-2' style='color: var(--emerald-primary);'></i>
+        ทรัพยากรที่เหลืออยู่ (Available)
+      </h3>";
+echo "<div class='table-responsive shadow-sm rounded mb-4'>
+      <table class='table table-bordered text-center align-middle mb-0 table-gradient'>";
+echo "<thead><tr>";
 for($j=0;$j<$numResources;$j++) echo "<th>R".($j+1)."</th>";
 echo "</tr></thead><tbody><tr>";
 for($j=0;$j<$numResources;$j++){
@@ -318,15 +311,18 @@ for($j=0;$j<$numResources;$j++){
 echo "</tr></tbody></table></div>";
 
 // --- Safety Algorithm Step-by-Step ---
-echo "<h2 class='h4 mt-5 mb-3'><i class='bi bi-play-btn-fill me-2'></i>บันทึกการทำงาน (Step-by-Step)</h2>";
-echo "<pre>";
+echo "<h2 class='h5 mt-4 mb-3'>
+        <i class='ti ti-search me-2' style='color: var(--emerald-primary);'></i>
+        ขั้นตอนการตรวจสอบ
+      </h2>";
+echo "<pre class='step-box'>";
 
 $WorkVector = $AvailableVector;
 $Finish = array_fill(0,$numProcesses,false);
 $SafeSequence = array();
 $processesFinishedCount = 0;
 $pass = 1;
-$maxIterations = $numProcesses * 3; // ป้องกัน infinite loop
+$maxIterations = $numProcesses * 3;
 
 echo "<strong class='text-white'>เริ่มต้น:</strong> Work = Available = " . formatArray($WorkVector) . "\n\n";
 
@@ -375,27 +371,36 @@ while($processesFinishedCount < $numProcesses && $pass <= $maxIterations){
     $pass++;
 }
 
-// ตรวจสอบ infinite loop
 if ($pass > $maxIterations) {
     echo "<span class='text-danger'>⚠️  การคำนวณถูกหยุดเนื่องจากใช้รอบมากเกินไป</span>\n";
 }
 echo "</pre>";
 
 // --- ตาราง Finish ---
-echo "<h2 class='h4 mt-5 mb-3'><i class='bi bi-check-circle-fill me-2'></i>ตารางสถานะ Finish (หลังประมวลผล)</h2>";
+echo "<h2 class='h5 mt-4 mb-3'>
+        <i class='ti ti-layout-grid me-2' style='color: var(--emerald-primary);'></i>
+        ตารางสถานะการทำงานของ Process
+      </h2>";
+
 echo "<div class='table-responsive shadow-sm rounded mb-4'>";
-echo "<table class='table table-bordered text-center align-middle mb-0 table-finish'>";
+echo "<table class='table table-bordered text-center align-middle mb-0 table-gradient table-Finish'>";
 echo "<thead class='table-light'><tr><th style='width:50%'>Process</th><th style='width:50%'>Status (Finish)</th></tr></thead><tbody>";
 for($i=0;$i<$numProcesses;$i++){
     $isFinished = isset($Finish[$i]) ? $Finish[$i] : false;
     echo "<tr><td>P".($i+1)."</td>";
-    echo $isFinished ? "<td class='finish-true'>✅ True</td>" : "<td class='finish-false'>❌ False</td>";
+echo $isFinished
+    ? "<td><span class='finish-true'><i class='bi bi-check-circle-fill me-1'></i>True</span></td>"
+    : "<td><span class='finish-false'><i class='bi bi-x-circle-fill me-1'></i>False</span></td>";
     echo "</tr>";
 }
 echo "</tbody></table></div>";
 
 // --- สรุปผล ---
-echo "<h2 class='h4 mt-5 mb-3'><i class='bi bi-flag-fill me-2'></i>ผลลัพธ์สุดท้าย</h2>";
+echo "<h2 class='h5 mt-4 mb-3'>
+        <i class='ti ti-flag me-2' style='color: var(--emerald-primary);'></i>
+        ผลลัพธ์สุดท้าย
+      </h2>";
+      
 if($processesFinishedCount == $numProcesses){
     echo "<div class='alert alert-success fs-5' role='alert'>";
     echo "<h4 class='alert-heading'><i class='bi bi-shield-check-fill me-2'></i>ระบบอยู่ในสถานะปลอดภัย (Safe State)</h4><hr>";
@@ -412,16 +417,18 @@ if($processesFinishedCount == $numProcesses){
 }
 
 echo "<hr class='my-5'>";
-// 🔧 แก้ไขลิงก์กลับเป็น /
-echo "<a href='/' class='btn btn-primary btn-lg w-100'>
-<i class='bi bi-arrow-left-circle-fill me-2'></i>ย้อนกลับไปกรอกข้อมูลใหม่
-</a>";
-
+echo "
+<div class='d-flex justify-content-center mt-4'>
+    <a href='index.php' class='btn btn-emerald btn-lg px-5'>
+        <i class='bi bi-arrow-left-circle-fill me-2'></i>
+        ย้อนกลับไปกรอกข้อมูลใหม่
+    </a>
+</div>
+";
 echo "</div></div></div>";
 
 // --- About Us Modal ---
-echo "<!-- About Us Modal -->
-<div class='modal fade' id='aboutModal' tabindex='-1'>
+echo "<div class='modal fade' id='aboutModal' tabindex='-1'>
     <div class='modal-dialog modal-lg'>
         <div class='modal-content'>
             <div class='modal-header bg-primary text-white'>
@@ -489,3 +496,4 @@ echo "<!-- About Us Modal -->
 
 echo "<script src='https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js'></script>";
 echo "</body></html>";
+?>
